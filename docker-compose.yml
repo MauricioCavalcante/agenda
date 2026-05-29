@@ -1,0 +1,19 @@
+version: '3.8'
+
+services:
+  agenda-app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: agenda_rpg_app
+    ports:
+      - "127.0.0.1:3050:3050"
+    volumes:
+      - ./data:/app/data
+      - ./cronograma.txt:/app/cronograma.txt
+    environment:
+      - HOST=0.0.0.0
+      - PORT=3050
+      - CRONOGRAMA_PATH=/app/cronograma.txt
+      - DATA_DIR=/app/data
+    restart: unless-stopped
