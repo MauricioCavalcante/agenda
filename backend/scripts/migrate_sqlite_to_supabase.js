@@ -12,11 +12,16 @@ const dbPath = process.env.DATA_DIR
   : path.resolve(__dirname, '../../agenda.db');
 
 import { createClient } from '@supabase/supabase-js';
+import ws from 'ws';
 
 const TARGET_EMAIL = 'mauriciocavalcante.dev@gmail.com';
 const TARGET_PASSWORD = 'Hitss@2019'; // Senha solicitada pelo Maurício
 
-const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_ANON_KEY);
+const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_ANON_KEY, {
+  realtime: {
+    transport: ws,
+  },
+});
 
 const pgPool = new Pool({
   connectionString: process.env.SUPABASE_DB_URL,

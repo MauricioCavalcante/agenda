@@ -16,6 +16,7 @@ import { fileURLToPath } from 'url';
 import database from './database.js';
 import { authMiddleware } from './src/middleware/authMiddleware.js';
 import { createClient } from '@supabase/supabase-js';
+import ws from 'ws';
 
 import statsRoute from './src/routes/statsRoute.js';
 import scheduleRoute from './src/routes/scheduleRoute.js';
@@ -55,7 +56,11 @@ try {
     const supabaseUrl = process.env.SUPABASE_URL;
     const supabaseKey = process.env.SUPABASE_ANON_KEY;
     if (supabaseUrl && supabaseKey) {
-      const tempSupabase = createClient(supabaseUrl, supabaseKey);
+      const tempSupabase = createClient(supabaseUrl, supabaseKey, {
+        realtime: {
+          transport: ws,
+        },
+      });
       tempSupabase.auth.signUp({
         email: 'mauricio@agenda.com',
         password: 'senha_secreta_123',

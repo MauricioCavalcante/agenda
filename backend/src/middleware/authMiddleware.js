@@ -1,4 +1,5 @@
 import { createClient } from '@supabase/supabase-js';
+import ws from 'ws';
 import { dbContext } from '../../database.js';
 
 let supabaseClient = null;
@@ -8,7 +9,11 @@ function getSupabase() {
     const supabaseUrl = process.env.SUPABASE_URL;
     const supabaseKey = process.env.SUPABASE_ANON_KEY;
     if (supabaseUrl && supabaseKey) {
-      supabaseClient = createClient(supabaseUrl, supabaseKey);
+      supabaseClient = createClient(supabaseUrl, supabaseKey, {
+        realtime: {
+          transport: ws,
+        },
+      });
     }
   }
   return supabaseClient;
