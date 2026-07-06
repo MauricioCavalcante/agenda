@@ -1,12 +1,23 @@
-// AI Service for interacting with LLM providers (OpenAI, Google Gemini, Anthropic, Ollama)
+/**
+ * Serviço de Integração com Inteligência Artificial
+ * 
+ * Responsável por:
+ * - Padronizar a comunicação com provedores locais e em nuvem (Ollama, OpenAI, Gemini, Anthropic)
+ * - Orquestrar prompts de sistema (Engenharia de Prompt) para geração de rotinas e treinos
+ * - Limpar respostas JSON mal formatadas retornadas pelos modelos
+ */
 
+/**
+ * Realiza chamadas padronizadas para diferentes provedores de IA.
+ * Trata autenticação, configuração de URLs locais/remotas e estrutura o payload de cada modelo.
+ */
 export async function callLLM(config, systemPrompt, userPrompt) {
-  const { provider, apiKey, model, apiEndpoint } = config;
+  const { provider, apiKey, model, endpoint } = config;
 
   if (provider === 'openai' || provider === 'ollama') {
     const url = provider === 'openai' 
       ? 'https://api.openai.com/v1/chat/completions' 
-      : `${apiEndpoint || 'http://localhost:11434'}/v1/chat/completions`;
+      : `${endpoint || 'http://localhost:11434'}/v1/chat/completions`;
     
     const headers = {
       'Content-Type': 'application/json'
@@ -105,6 +116,10 @@ export async function callLLM(config, systemPrompt, userPrompt) {
   }
 }
 
+/**
+ * Sanitiza a resposta bruta da IA removendo blocos de markdown (```json).
+ * Garante que a saída possa ser processada nativamente pelo JSON.parse().
+ */
 export function cleanJsonBlock(rawResponse) {
   let cleanJsonStr = rawResponse.trim();
   if (cleanJsonStr.startsWith('```json')) {
@@ -115,26 +130,34 @@ export function cleanJsonBlock(rawResponse) {
   return cleanJsonStr;
 }
 
+/**
+ * Aciona o assistente "LevelUp Routine AI".
+ * Injeta o contexto diário do usuário, metas ativas e rotina fixa para gerar um 
+ * cronograma reorganizado e inteligente, priorizando "tarefas intercaladas".
+ */
 export async function generateSchedule(config, date, currentTasks, activeGoals, physicalSetup, note) {
   const systemPrompt = `Você é o LevelUp Routine AI, um assistente inteligente especializado em produtividade, organização de tempo e gamificação de rotina.
 Sua missão é reorganizar o cronograma diário do usuário para encaixar suas metas de desenvolvimento pessoal, profissional, educacional, físico, financeiro e social.
 
+Conceito Importante: TAREFAS RECORRENTES COMO BASE E RESPEITO AOS BLOCOS FIXOS
+O usuário já possui um cronograma atual do dia (com blocos fixos importantes, como trabalho de 8h, sono, almoço). Você DEVE preservar essas tarefas longas e fixas!
+O seu trabalho é usar as "Metas Recorrentes" para preencher os espaços vazios do dia ou intercalá-las dentro dos blocos longos de baixa demanda. Nunca exclua as tarefas longas (como CLT/Trabalho de 8h) do cronograma atual.
+
 Conceito Importante: TAREFAS INTERCALADAS (Paralelas)
 O usuário possui blocos longos em sua rotina (como "Trabalho CLT"). Muitas vezes, esses blocos longos possuem períodos de baixa demanda.
-Sua tarefa é identificar esses blocos e, se adequado (ou se o usuário pedir nas observações), "intercalar" metas recorrentes (como ler um livro, ver uma videoaula, fazer um curso rápido) DENTRO desse período.
-Regras para tarefas intercaladas:
-1. Uma tarefa intercalada deve ser inserida na lista de tarefas retornada.
-2. Ela DEVE possuir o campo "parentId" igual ao ID da tarefa pai na qual ela ocorre (ex: o ID da tarefa CLT).
-3. O horário de início e fim da tarefa intercalada (startTime e endTime) DEVE estar totalmente contido no intervalo de tempo da tarefa pai.
-4. Ela possui sua própria esfera (ex: Educacional para ver aulas) e seu próprio XP.
+Sua tarefa é identificar esses blocos e "intercalar" metas recorrentes (como ler um livro, ver uma videoaula) DENTRO desse período se houver encaixe.
+A tarefa intercalada DEVE possuir o campo "parentId" igual ao ID da tarefa pai e o horário deve estar totalmente contido no intervalo da tarefa pai.
+
+Adições Solicitadas (Observações):
+Se o usuário solicitar uma adição ao dia nas observações:
+- Se for uma atividade pontual (ex: "hoje preciso ir ao médico às 14h"), remaneje o cronograma para acomodar essa nova atividade.
+- Se a solicitação for um hábito novo que o usuário quer levar pra vida ou repetir com frequência (ex: "quero começar a meditar 15 min todo dia", "adicione corrida 3x na semana"), adicione esta nova meta no array 'newRecurringGoals' do JSON. Assim, o sistema vai ativá-la permanentemente para o usuário.
 
 Regras Gerais:
-1. Preserve o escopo geral do dia. Não exclua tarefas padrão importantes (como CLT, Almoço e Estudos padrão) a menos que o usuário solicite explicitamente nas observações.
-2. Você pode ajustar levemente os horários de início e fim das tarefas padrão (como adiantar ou atrasar em 30m ou 1h) para acomodar novas metas, se necessário.
-3. Se houver metas recorrentes do usuário, tente encaixá-las respeitando a duração solicitada.
-4. Calcule o XP para cada tarefa gerada/metas (10 XP por hora para Pessoal/Social, 15 XP por hora para Profissional/Educacional/Físico/Financeiro. Tarefas curtas de 30 minutos ganham metade do XP, mínimo 5 XP, exceto refeições/descanso que ganham 0 XP).
-5. Se o dia de hoje incluir blocos da esfera "Físico" (Exercícios Físicos), tente customizar o título e a descrição dessa tarefa utilizando a lista de exercícios desejados e o plano de treino físico ativo do usuário fornecidos no prompt (ex: "Exercícios Físicos: Treino A (Superior)" ou similar, em vez de apenas "Exercícios Físicos").
-6. O resultado deve ser retornado EXCLUSIVAMENTE em formato JSON estruturado, sem explicações em texto.
+1. Preserve o escopo geral do dia. Não exclua tarefas padrão a menos que o usuário solicite explicitamente.
+2. Você pode ajustar levemente os horários (adiantar/atrasar) para acomodar novas metas.
+3. Calcule o XP (10 XP/h para Pessoal/Social, 15 XP/h para o resto. Mínimo de 5 XP).
+4. O resultado deve ser retornado EXCLUSIVAMENTE em formato JSON estruturado, sem explicações em texto.
 
 Formato JSON esperado:
 {
@@ -149,7 +172,15 @@ Formato JSON esperado:
       "xp": 15,
       "completed": false,
       "description": "",
-      "parentId": "id_da_tarefa_pai_se_for_intercalada_ou_null_se_for_normal"
+      "parentId": "id_da_tarefa_pai_se_for_intercalada_ou_null"
+    }
+  ],
+  "newRecurringGoals": [
+    {
+      "title": "Hábito novo sugerido",
+      "durationMins": 15,
+      "sphere": "Pessoal",
+      "frequency": "0,1,2,3,4,5,6" // dias da semana separados por vírgula. 0=Dom, 1=Seg... 6=Sab
     }
   ]
 }`;
@@ -169,10 +200,17 @@ Observações/Instruções do usuário para hoje:
 "${note || 'Nenhuma observação extra. Organize o dia da melhor forma possível, intercalando metas de estudos ou pessoal se houver espaço no trabalho ou horários livres.'}"`;
 
   const raw = await callLLM(config, systemPrompt, userPrompt);
+  console.log("=== AI RAW RESPONSE (Schedule) ===");
+  console.log(raw);
   const clean = cleanJsonBlock(raw);
   return JSON.parse(clean);
 }
 
+/**
+ * Aciona o assistente "Personal Trainer IA".
+ * Avalia os exercícios desejados e retorna um treino estruturado de 
+ * corpo inteiro com rotinas, séries, repetições e descrições técnicas.
+ */
 export async function generateWorkoutPlan(config, desiredExercises) {
   const systemPrompt = `Você é um Personal Trainer IA especializado em calistenia, musculação, corrida e condicionamento físico.
 Sua missão é criar um plano de treino semanal/rotina detalhado e estruturado para o usuário, com foco em desenvolvimento e saúde física (Esfera Físico).
@@ -213,6 +251,11 @@ Formato JSON esperado:
   return JSON.parse(clean);
 }
 
+/**
+ * Aciona o assistente "Mestre de Orçamentos RPG".
+ * Cria uma planilha orçamentária sugerida com base na renda e meta de economia,
+ * transformando esses alvos financeiros em "Missões (Quests)" mensais de RPG.
+ */
 export async function generateFinancialPlan(config, financialGoals, monthlyIncome, savingsTargetPercent) {
   const systemPrompt = `Você é um Mestre de Orçamentos RPG e Assessor Financeiro IA gamificado.
 Sua missão é criar um plano de orçamento gamificado e 4 quests financeiras mensais para a Esfera Financeira do usuário.
@@ -263,6 +306,11 @@ Objetivos declarados pelo usuário: "${financialGoals || 'Nenhum objetivo espec�
   return JSON.parse(clean);
 }
 
+/**
+ * Aciona o assistente "LevelUp Book AI".
+ * Calcula dinamicamente uma quantidade justa de XP de recompensa
+ * com base na densidade técnica, profundidade e tamanho do livro lido.
+ */
 export async function calculateBookXp(config, title, author, sphere, pages, goal, depth) {
   const systemPrompt = `Você é o LevelUp Book AI, um módulo especializado em gamificação de hábitos de leitura.
 Sua tarefa é calcular o XP ideal para a conclusão de um livro com base nos detalhes informados pelo usuário.

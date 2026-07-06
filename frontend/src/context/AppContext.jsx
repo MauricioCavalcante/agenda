@@ -1,8 +1,30 @@
-import React, { createContext, useState, useEffect } from 'react';
+/**
+ * Contexto Global (State Management)
+ */
+import React, { createContext, useState, useEffect, useRef } from 'react';
+import { supabase } from '../lib/supabase';
 
 export const AppContext = createContext();
 
 const API_BASE = '/api';
+
+// Intercepta todas as chamadas 'fetch' neste arquivo para injetar o JWT
+const _originalFetch = window.fetch;
+const fetch = async (url, options = {}) => {
+  const { data: { session } } = await supabase.auth.getSession();
+  const headers = { ...options.headers };
+  if (session?.access_token) {
+    headers['Authorization'] = `Bearer ${session.access_token}`;
+  }
+  const response = await _originalFetch(url, { ...options, headers });
+  if (response.status === 401) {
+    await supabase.auth.signOut();
+    if (window.location.pathname !== '/login') {
+      window.location.href = '/login';
+    }
+  }
+  return response;
+};
 
 export function getTodayString() {
   const d = new Date();
@@ -20,6 +42,12 @@ export function AppProvider({ children }) {
   const [navOpen, setNavOpen] = useState(false);
   const [date, setDate] = useState(getTodayString());
   const [schedule, setSchedule] = useState([]);
+  const scheduleRef = useRef([]);
+  const setScheduleWithRef = (value) => {
+    const resolved = typeof value === 'function' ? value(scheduleRef.current) : value;
+    scheduleRef.current = resolved;
+    setSchedule(resolved);
+  };
   const [stats, setStats] = useState(null);
   const [history, setHistory] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -28,15 +56,42 @@ export function AppProvider({ children }) {
   // AI Config States
   const [aiProvider, setAiProvider] = useState('openai');
   const [aiApiKey, setAiApiKey] = useState('');
+  const [isSavingAiConfig, setIsSavingAiConfig] = useState(false);
   const [aiModel, setAiModel] = useState('gpt-4o-mini');
   const [aiEndpoint, setAiEndpoint] = useState('https://api.openai.com/v1');
+
+  // Auth State
+  const [session, setSession] = useState(null);
+
+  // Database State
+  const [dbProvider, setDbProvider] = useState('sqlite');
+  const [dbConnectionString, setDbConnectionString] = useState('');
+  const [dbHost, setDbHost] = useState('');
+  const [dbPort, setDbPort] = useState(5432);
+  const [dbDatabase, setDbDatabase] = useState('');
+  const [dbUsername, setDbUsername] = useState('');
+  const [dbPassword, setDbPassword] = useState('');
+  const [dbSsl, setDbSsl] = useState(true);
+  const [dbActive, setDbActive] = useState(false);
+  const [testingDbConnection, setTestingDbConnection] = useState(false);
+  const [activatingDb, setActivatingDb] = useState(false);
+
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setSession(session);
+    });
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      setSession(session);
+    });
+    return () => subscription.unsubscribe();
+  }, []);
 
   // Goals States
   const [goals, setGoals] = useState([]);
   const [goalTitle, setGoalTitle] = useState('');
   const [goalDuration, setGoalDuration] = useState(30);
   const [goalSphere, setGoalSphere] = useState('Profissional');
-  const [goalFreq, setGoalFreq] = useState('Todos os dias');
+  const [goalFreq, setGoalFreq] = useState('0,1,2,3,4,5,6');
   const [editingGoal, setEditingGoal] = useState(null);
 
   // AI Prompt State
@@ -86,6 +141,9 @@ export function AppProvider({ children }) {
   const [meetStart, setMeetStart] = useState('14:00');
   const [meetEnd, setMeetEnd] = useState('15:00');
   const [meetSphere, setMeetSphere] = useState('Profissional');
+  const [meetParentId, setMeetParentId] = useState(null);
+  const [meetIsMeeting, setMeetIsMeeting] = useState(false);
+  const [meetShift, setMeetShift] = useState(true);
 
   // Edit task Form States
   const [editingTask, setEditingTask] = useState(null);
@@ -97,6 +155,10 @@ export function AppProvider({ children }) {
   const [editDesc, setEditDesc] = useState('');
   const [editCompleted, setEditCompleted] = useState(false);
   const [editParentId, setEditParentId] = useState(null);
+  const [editIsMeeting, setEditIsMeeting] = useState(false);
+
+  const [isSavingTask, setIsSavingTask] = useState(false);
+  const [isDeletingTask, setIsDeletingTask] = useState(false);
 
   // Complete task Form States
   const [completionTask, setCompletionTask] = useState(null);
@@ -104,7 +166,11 @@ export function AppProvider({ children }) {
 
   // Apply Theme Effect
   useEffect(() => {
-    document.documentElement.setAttribute('data-theme', theme);
+    if (theme === 'light') {
+      document.documentElement.classList.add('light-theme');
+    } else {
+      document.documentElement.classList.remove('light-theme');
+    }
     localStorage.setItem('theme', theme);
   }, [theme]);
 
@@ -144,22 +210,22 @@ export function AppProvider({ children }) {
     }
   };
 
-  const fetchSchedule = async (targetDate) => {
-    setLoading(true);
+  const fetchSchedule = async (targetDate, silent = false) => {
+    if (!silent) setLoading(true);
     try {
       const res = await fetch(`${API_BASE}/schedule?date=${targetDate}`);
       const data = await res.json();
       if (Array.isArray(data)) {
-        setSchedule(data);
+        setScheduleWithRef(data);
       } else {
         console.error("fetchSchedule: expected array, got", data);
-        setSchedule([]);
+        if (!silent) setScheduleWithRef([]);
       }
     } catch (e) {
       console.error("Error fetching schedule:", e);
-      setSchedule([]);
+      if (!silent) setScheduleWithRef([]);
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   };
 
@@ -203,6 +269,24 @@ export function AppProvider({ children }) {
       setAiApiKey(data.apiKey || '');
     } catch (e) {
       console.error("Error fetching AI config:", e);
+    }
+  };
+
+  const fetchDbConfig = async () => {
+    try {
+      const res = await fetch(`${API_BASE}/db-config`);
+      const data = await res.json();
+      setDbProvider(data.provider || 'sqlite');
+      setDbConnectionString(data.connection_string || '');
+      setDbHost(data.host || '');
+      setDbPort(data.port || 5432);
+      setDbDatabase(data.database || '');
+      setDbUsername(data.username || '');
+      setDbPassword(data.password || '');
+      setDbSsl(data.ssl !== false);
+      setDbActive(!!data.active);
+    } catch (e) {
+      console.error("Error fetching DB config:", e);
     }
   };
 
@@ -601,7 +685,7 @@ export function AppProvider({ children }) {
         fetchStats();
         fetchHistory();
         fetchCalendarXp();
-        fetchSchedule(date);
+        fetchSchedule(date, true);
       }
     } catch (e) {
       console.error("Error toggling book:", e);
@@ -623,7 +707,7 @@ export function AppProvider({ children }) {
         fetchStats();
         fetchHistory();
         fetchCalendarXp();
-        fetchSchedule(date);
+        fetchSchedule(date, true);
       } else {
         alert("Falha ao remover o livro.");
       }
@@ -633,42 +717,64 @@ export function AppProvider({ children }) {
     }
   };
 
+  const [isCompleting, setIsCompleting] = useState(false);
+
   const handleCompleteTask = async () => {
     if (!completionTask) return;
+    const taskSnapshot = completionTask;
+    const descSnapshot = completionDesc;
+
+    setIsCompleting(true);
     try {
       const res = await fetch(`${API_BASE}/schedule/complete`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           date,
-          taskId: completionTask.id,
-          description: completionDesc || "Atividade concluída."
+          taskId: taskSnapshot.id,
+          description: descSnapshot || "Atividade concluída."
         })
       });
+      
+      if (!res.ok) {
+        throw new Error("Erro de resposta do servidor");
+      }
+      
       const data = await res.json();
       if (data.success) {
-        const oldLevel = stats?.spheres?.[completionTask.sphere]?.level;
-        const newLevel = data.stats?.spheres?.[completionTask.sphere]?.level;
-        
+        const oldLevel = stats?.spheres?.[taskSnapshot.sphere]?.level;
+        const newLevel = data.stats?.spheres?.[taskSnapshot.sphere]?.level;
+
         if (newLevel > oldLevel) {
           triggerBrowserNotification(
-            `🎉 LEVEL UP! ${completionTask.sphere}`,
-            `Parabéns! Sua esfera ${completionTask.sphere} subiu para o nível ${newLevel} (${data.stats?.spheres?.[completionTask.sphere]?.title || ''})!`
+            `🎉 LEVEL UP! ${taskSnapshot.sphere}`,
+            `Parabéns! Sua esfera ${taskSnapshot.sphere} subiu para o nível ${newLevel} (${data.stats?.spheres?.[taskSnapshot.sphere]?.title || ''})!`
           );
-          showToast(`Level Up na esfera ${completionTask.sphere}! Nível ${newLevel}!`);
+          showToast(`Level Up na esfera ${taskSnapshot.sphere}! Nível ${newLevel}!`);
         } else {
-          showToast(`Tarefa concluída! +${completionTask.xp} XP em ${completionTask.sphere}`);
+          showToast(`Tarefa concluída! +${taskSnapshot.xp} XP em ${taskSnapshot.sphere}`);
         }
 
-        setCompletionTask(null);
-        setCompletionDesc('');
-        fetchSchedule(date);
-        fetchStats();
+        if (Array.isArray(data.schedule)) {
+          setScheduleWithRef(data.schedule);
+        } else {
+          fetchSchedule(date, true);
+        }
+        if (data.stats) setStats(data.stats);
         fetchHistory();
         fetchCalendarXp();
+        
+        // Close modal only on success
+        setCompletionTask(null);
+        setCompletionDesc('');
+      } else {
+        showToast("Erro ao concluir tarefa. Tente novamente.");
       }
     } catch (e) {
       console.error("Error completing task:", e);
+      showToast("Erro de rede ao concluir tarefa. Tente novamente.");
+    } finally {
+      setIsCompleting(false);
     }
   };
 
@@ -691,7 +797,7 @@ export function AppProvider({ children }) {
         });
         const updatedSchedule = await res.json();
         if (Array.isArray(updatedSchedule)) {
-          setSchedule(updatedSchedule);
+          setScheduleWithRef(updatedSchedule);
         }
         setMeetTitle('');
         showToast("Agenda reorganizada! Horários subsequentes deslocados.");
@@ -713,14 +819,16 @@ export function AppProvider({ children }) {
             startTime: meetStart,
             endTime: meetEnd,
             title: meetTitle,
-            sphere: meetSphere
+            sphere: meetSphere,
+            parentId: meetParentId || null
           })
         });
         const updatedSchedule = await res.json();
         if (Array.isArray(updatedSchedule)) {
-          setSchedule(updatedSchedule);
+          setScheduleWithRef(updatedSchedule);
         }
         setMeetTitle('');
+        setMeetParentId(null);
         showToast("Atividade fixa inserida com sucesso!");
 
         triggerBrowserNotification(
@@ -736,14 +844,16 @@ export function AppProvider({ children }) {
   const handleEditTask = async (e) => {
     if (e && e.preventDefault) e.preventDefault();
     if (!editingTask) return;
+    const taskSnapshot = { ...editingTask };
 
+    setIsSavingTask(true);
     try {
       const res = await fetch(`${API_BASE}/schedule/edit-task`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           date,
-          taskId: editingTask.id,
+          taskId: taskSnapshot.id,
           title: editTitle,
           startTime: editStart,
           endTime: editEnd,
@@ -754,47 +864,79 @@ export function AppProvider({ children }) {
           parentId: editParentId || null
         })
       });
+
+      if (!res.ok) {
+        throw new Error("Erro de resposta do servidor");
+      }
+
       const data = await res.json();
       if (data.success) {
         showToast("Atividade atualizada com sucesso!");
-        setEditingTask(null);
-        fetchSchedule(date);
-        fetchStats();
+        if (Array.isArray(data.schedule)) {
+          setScheduleWithRef(data.schedule);
+        } else {
+          fetchSchedule(date, true);
+        }
+        if (data.stats) setStats(data.stats);
         fetchHistory();
         fetchCalendarXp();
+        
+        // Close modal on success
+        setEditingTask(null);
+      } else {
+        showToast("Erro ao atualizar atividade. Tente novamente.");
       }
     } catch (e) {
       console.error("Error editing task:", e);
+      showToast("Erro de rede ao atualizar atividade. Tente novamente.");
+    } finally {
+      setIsSavingTask(false);
     }
   };
 
   const handleDeleteTask = async (taskId) => {
     if (!window.confirm("Deseja realmente excluir esta atividade?")) return;
+
+    setIsDeletingTask(true);
     try {
       const res = await fetch(`${API_BASE}/schedule/delete-task`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          date,
-          taskId
-        })
+        body: JSON.stringify({ date, taskId })
       });
+
+      if (!res.ok) {
+        throw new Error("Erro de resposta do servidor");
+      }
+
       const data = await res.json();
       if (data.success) {
         showToast("Atividade excluída!");
-        setEditingTask(null);
-        fetchSchedule(date);
-        fetchStats();
+        if (Array.isArray(data.schedule)) {
+          setScheduleWithRef(data.schedule);
+        } else {
+          fetchSchedule(date, true);
+        }
+        if (data.stats) setStats(data.stats);
         fetchHistory();
         fetchCalendarXp();
+
+        // Close modal on success
+        setEditingTask(null);
+      } else {
+        showToast("Erro ao excluir atividade. Tente novamente.");
       }
     } catch (e) {
       console.error("Error deleting task:", e);
+      showToast("Erro de rede ao excluir atividade. Tente novamente.");
+    } finally {
+      setIsDeletingTask(false);
     }
   };
 
   const handleSaveAiConfig = async (e) => {
     if (e && e.preventDefault) e.preventDefault();
+    setIsSavingAiConfig(true);
     try {
       const res = await fetch(`${API_BASE}/ai-config`, {
         method: 'POST',
@@ -807,12 +949,127 @@ export function AppProvider({ children }) {
         })
       });
       const data = await res.json();
-      if (data.success) {
+      if (res.ok && data.success) {
         showToast("Configurações de IA salvas!");
         fetchAiConfig();
+      } else {
+        showToast("Erro ao salvar: " + (data.error || "Tente novamente."));
       }
     } catch (e) {
       console.error("Error saving AI config:", e);
+      showToast("Erro de conexão ao salvar configurações.");
+    } finally {
+      setIsSavingAiConfig(false);
+    }
+  };
+
+  const handleTestDbConnection = async () => {
+    setTestingDbConnection(true);
+    try {
+      const res = await fetch(`${API_BASE}/db-config/test`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          connection_string: dbConnectionString,
+          host: dbHost,
+          port: dbPort,
+          database: dbDatabase,
+          username: dbUsername,
+          password: dbPassword,
+          ssl: dbSsl
+        })
+      });
+      const data = await res.json();
+      if (res.ok) {
+        showToast(data.message || "Conexão de teste bem-sucedida!");
+        return { success: true };
+      } else {
+        alert(data.error || "Falha na conexão de teste.");
+        return { success: false };
+      }
+    } catch (e) {
+      console.error("Error testing DB connection:", e);
+      alert("Erro de conexão ao testar banco de dados.");
+      return { success: false };
+    } finally {
+      setTestingDbConnection(false);
+    }
+  };
+
+  const handleActivateDbConnection = async (migrateData) => {
+    setActivatingDb(true);
+    try {
+      const res = await fetch(`${API_BASE}/db-config/activate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          connection_string: dbConnectionString,
+          host: dbHost,
+          port: dbPort,
+          database: dbDatabase,
+          username: dbUsername,
+          password: dbPassword,
+          ssl: dbSsl,
+          migrateData
+        })
+      });
+      const data = await res.json();
+      if (res.ok) {
+        showToast("Banco de dados ativado com sucesso!");
+        await fetchDbConfig();
+        await fetchStats();
+        await fetchSchedule(date);
+        await fetchHistory();
+        await fetchGoals();
+        await fetchAiConfig();
+        await fetchCalendarXp();
+        await fetchPhysicalSetup();
+        await fetchFinancialSetup();
+        await fetchBooks();
+        return { success: true };
+      } else {
+        alert(data.error || "Erro ao ativar banco de dados.");
+        return { success: false };
+      }
+    } catch (e) {
+      console.error("Error activating DB connection:", e);
+      alert("Erro ao conectar à API de ativação de banco de dados.");
+      return { success: false };
+    } finally {
+      setActivatingDb(false);
+    }
+  };
+
+  const handleDeactivateDbConnection = async () => {
+    setActivatingDb(true);
+    try {
+      const res = await fetch(`${API_BASE}/db-config/deactivate`, {
+        method: 'POST'
+      });
+      const data = await res.json();
+      if (res.ok) {
+        showToast("Banco de dados desconectado! Retornando ao SQLite local.");
+        await fetchDbConfig();
+        await fetchStats();
+        await fetchSchedule(date);
+        await fetchHistory();
+        await fetchGoals();
+        await fetchAiConfig();
+        await fetchCalendarXp();
+        await fetchPhysicalSetup();
+        await fetchFinancialSetup();
+        await fetchBooks();
+        return { success: true };
+      } else {
+        alert(data.error || "Erro ao desativar banco remoto.");
+        return { success: false };
+      }
+    } catch (e) {
+      console.error("Error deactivating DB connection:", e);
+      alert("Erro ao desconectar banco de dados.");
+      return { success: false };
+    } finally {
+      setActivatingDb(false);
     }
   };
 
@@ -831,13 +1088,16 @@ export function AppProvider({ children }) {
         })
       });
       const data = await res.json();
-      if (Array.isArray(data)) {
+      if (res.ok && Array.isArray(data)) {
         setGoals(data);
+        setGoalTitle('');
+        showToast("Meta recorrente cadastrada!");
+      } else {
+        showToast("Erro ao cadastrar meta: " + (data.error || "Tente novamente."));
       }
-      setGoalTitle('');
-      showToast("Meta recorrente cadastrada!");
     } catch (e) {
       console.error("Error adding goal:", e);
+      showToast("Erro de conexão ao cadastrar meta.");
     }
   };
 
@@ -906,7 +1166,7 @@ export function AppProvider({ children }) {
       }
       const data = await res.json();
       if (Array.isArray(data)) {
-        setSchedule(data);
+        setScheduleWithRef(data);
         fetchStats();
         fetchHistory();
         fetchCalendarXp();
@@ -1014,22 +1274,192 @@ export function AppProvider({ children }) {
     return names[monthIdx];
   };
 
+  // -------------------------------------------------------------
+  // Todo List States and Handlers
+  // -------------------------------------------------------------
+  const [todos, setTodos] = useState([]);
+  const [todoTitle, setTodoTitle] = useState('');
+  const [todoLabel, setTodoLabel] = useState('');
+  const [todoSphere, setTodoSphere] = useState('Profissional');
+  const [todoXp, setTodoXp] = useState(10);
+  const [todoDescription, setTodoDescription] = useState('');
+  const [todoParentId, setTodoParentId] = useState('');
+  const [loadingTodos, setLoadingTodos] = useState(false);
+  const [addingTodo, setAddingTodo] = useState(false);
+
+  const fetchTodos = async () => {
+    setLoadingTodos(true);
+    try {
+      const res = await fetch(`${API_BASE}/todos`);
+      const data = await res.json();
+      if (Array.isArray(data)) {
+        setTodos(data);
+      } else {
+        setTodos([]);
+      }
+    } catch (e) {
+      console.error("Error fetching todos:", e);
+      setTodos([]);
+    } finally {
+      setLoadingTodos(false);
+    }
+  };
+
+  const handleAddTodo = async (e) => {
+    if (e && e.preventDefault) e.preventDefault();
+    if (!todoTitle || !todoLabel) return;
+    setAddingTodo(true);
+    try {
+      const res = await fetch(`${API_BASE}/todos`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          title: todoTitle,
+          label: todoLabel,
+          sphere: todoSphere,
+          xp: Number(todoXp),
+          parentId: todoParentId || null,
+          description: todoDescription
+        })
+      });
+      if (!res.ok) {
+        const errData = await res.json();
+        alert(errData.error || "Erro ao cadastrar tarefa");
+        return;
+      }
+      const data = await res.json();
+      if (data.success) {
+        showToast("Tarefa cadastrada com sucesso!");
+        setTodoTitle('');
+        setTodoLabel('');
+        setTodoXp(10);
+        setTodoDescription('');
+        setTodoParentId('');
+        if (Array.isArray(data.todos)) {
+          setTodos(data.todos);
+        } else {
+          fetchTodos();
+        }
+      }
+    } catch (e) {
+      console.error("Error adding todo:", e);
+      alert("Erro de conexão ao adicionar tarefa.");
+    } finally {
+      setAddingTodo(false);
+    }
+  };
+
+  const handleCompleteTodo = async (todoId) => {
+    try {
+      const res = await fetch(`${API_BASE}/todos/toggle-complete`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ todoId })
+      });
+      if (!res.ok) {
+        alert("Erro ao alternar conclusão da tarefa.");
+        return;
+      }
+      const data = await res.json();
+      if (data.success) {
+        const completedTodo = todos.find(t => t.id === todoId);
+        const wasCompleted = completedTodo?.completed;
+        
+        if (wasCompleted) {
+          showToast("Tarefa marcada como pendente! XP removido.");
+        } else {
+          showToast(`Tarefa concluída! +${completedTodo?.xp || 10} XP obtidos.`);
+        }
+        
+        if (Array.isArray(data.todos)) {
+          setTodos(data.todos);
+        } else {
+          fetchTodos();
+        }
+        
+        if (data.stats) setStats(data.stats);
+        fetchHistory();
+        fetchCalendarXp();
+        fetchSchedule(date, true);
+      }
+    } catch (e) {
+      console.error("Error toggling todo completion:", e);
+      alert("Erro de rede ao alternar conclusão da tarefa.");
+    }
+  };
+
+  const handleUpdateTodo = async (todoId, updatedFields) => {
+    try {
+      const res = await fetch(`${API_BASE}/todos/update`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ todoId, ...updatedFields })
+      });
+      if (!res.ok) {
+        alert("Erro ao atualizar tarefa.");
+        return;
+      }
+      const data = await res.json();
+      if (data.success && Array.isArray(data.todos)) {
+        setTodos(data.todos);
+        showToast("Tarefa atualizada!");
+      } else {
+        fetchTodos();
+      }
+    } catch (e) {
+      console.error("Error updating todo:", e);
+    }
+  };
+
+  const handleDeleteTodo = async (todoId) => {
+    if (!window.confirm("Deseja realmente remover esta tarefa? Isso anulará qualquer XP associado caso estivesse concluída.")) {
+      return;
+    }
+    try {
+      const res = await fetch(`${API_BASE}/todos/${todoId}`, {
+        method: 'DELETE'
+      });
+      if (res.ok) {
+        const data = await res.json();
+        showToast("Tarefa removida.");
+        if (Array.isArray(data.todos)) {
+          setTodos(data.todos);
+        } else {
+          fetchTodos();
+        }
+        if (data.stats) setStats(data.stats);
+        fetchHistory();
+        fetchCalendarXp();
+        fetchSchedule(date, true);
+      } else {
+        alert("Falha ao remover a tarefa.");
+      }
+    } catch (e) {
+      console.error("Error deleting todo:", e);
+      alert("Erro de conexão ao remover tarefa.");
+    }
+  };
+
   // Fetch initial data
   useEffect(() => {
+    if (!session) return;
     fetchStats();
     fetchHistory();
     fetchGoals();
     fetchAiConfig();
+    fetchDbConfig();
     fetchCalendarXp();
     fetchPhysicalSetup();
     fetchFinancialSetup();
     fetchBooks();
-  }, []);
+    fetchTodos();
+  }, [session]);
 
   // Fetch schedule whenever date changes
   useEffect(() => {
+    if (!session) return;
     fetchSchedule(date);
-  }, [date]);
+  }, [date, session]);
 
   // Global context values
   const contextValue = {
@@ -1037,7 +1467,7 @@ export function AppProvider({ children }) {
     theme, setTheme,
     navOpen, setNavOpen,
     date, setDate,
-    schedule, setSchedule,
+    schedule, setSchedule: setScheduleWithRef,
     stats, setStats,
     history, setHistory,
     loading, setLoading,
@@ -1088,6 +1518,7 @@ export function AppProvider({ children }) {
     meetStart, setMeetStart,
     meetEnd, setMeetEnd,
     meetSphere, setMeetSphere,
+    meetParentId, setMeetParentId,
     editingTask, setEditingTask,
     editTitle, setEditTitle,
     editStart, setEditStart,
@@ -1099,6 +1530,23 @@ export function AppProvider({ children }) {
     editParentId, setEditParentId,
     completionTask, setCompletionTask,
     completionDesc, setCompletionDesc,
+    isCompleting,
+    isSavingTask,
+    isDeletingTask,
+    session, setSession,
+    dbProvider, dbConnectionString, dbHost, dbPort, dbDatabase, dbUsername, dbPassword, dbSsl, dbActive,
+    testingDbConnection, activatingDb,
+    isSavingAiConfig,
+
+    // Todo list states
+    todos, setTodos,
+    todoTitle, setTodoTitle,
+    todoLabel, setTodoLabel,
+    todoSphere, setTodoSphere,
+    todoXp, setTodoXp,
+    todoDescription, setTodoDescription,
+    todoParentId, setTodoParentId,
+    loadingTodos, addingTodo,
 
     // Handlers
     showToast,
@@ -1108,6 +1556,7 @@ export function AppProvider({ children }) {
     fetchHistory,
     fetchGoals,
     fetchAiConfig,
+    fetchDbConfig,
     fetchCalendarXp,
     fetchPhysicalSetup,
     handleSaveDesiredExercises,
@@ -1129,6 +1578,9 @@ export function AppProvider({ children }) {
     handleEditTask,
     handleDeleteTask,
     handleSaveAiConfig,
+    handleTestDbConnection,
+    handleActivateDbConnection,
+    handleDeactivateDbConnection,
     handleAddGoal,
     handleUpdateGoal,
     handleDeleteGoal,
@@ -1138,7 +1590,12 @@ export function AppProvider({ children }) {
     changeCalendarMonth,
     getDaysInMonthGrid,
     formatDisplayDate,
-    getMonthName
+    getMonthName,
+    fetchTodos,
+    handleAddTodo,
+    handleCompleteTodo,
+    handleUpdateTodo,
+    handleDeleteTodo
   };
 
   return (

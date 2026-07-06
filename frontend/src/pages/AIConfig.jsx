@@ -1,4 +1,10 @@
-import React, { useContext } from 'react';
+/**
+ * Configuração da Inteligência Artificial
+ * 
+ * Painel administrativo para definir provedores (OpenAI, Gemini, Ollama),
+ * chave de acesso (API Key) e modelo padrão para as gerações textuais.
+ */
+import React, { useContext, useState, useEffect } from 'react';
 import { Brain, Key } from 'lucide-react';
 import { AppContext } from '../context/AppContext';
 
@@ -12,7 +18,8 @@ export default function AIConfig() {
     setAiEndpoint,
     aiApiKey,
     setAiApiKey,
-    handleSaveAiConfig
+    handleSaveAiConfig,
+    isSavingAiConfig
   } = useContext(AppContext);
 
   return (
@@ -87,9 +94,18 @@ export default function AIConfig() {
           </div>
         )}
 
-        <button type="submit" className="btn" style={{ alignSelf: 'flex-start', marginTop: '12px' }}>
-          <Key size={16} />
-          Salvar Configurações
+        <button type="submit" className="btn" style={{ alignSelf: 'flex-start', marginTop: '12px' }} disabled={isSavingAiConfig}>
+          {isSavingAiConfig ? (
+            <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <div className="loader" style={{ width: '16px', height: '16px', borderWidth: '2px' }}></div>
+              Salvando...
+            </span>
+          ) : (
+            <>
+              <Key size={16} />
+              Salvar Configurações
+            </>
+          )}
         </button>
       </form>
     </div>

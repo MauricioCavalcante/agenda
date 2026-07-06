@@ -1,10 +1,17 @@
+/**
+ * Esfera Financeira
+ * 
+ * Responsável por persistir metas de poupança, gerenciar o plano financeiro sugerido pela IA
+ * e processar as quests mensais de RPG relativas aos gastos.
+ */
 import express from 'express';
 import database from '../../database.js';
 import { callLLM } from '../services/aiService.js';
+import { decryptKey } from '../utils/crypto.js';
 
 const router = express.Router();
 
-// Function to sanitize financial plan JSON structure
+/** Sanitiza e valida as quebras do JSON financeiro. */
 function sanitizeFinancialPlan(plan) {
   if (!plan) return { generalNotes: "", suggestedBudgets: [], quests: [] };
   const suggestedBudgets = Array.isArray(plan.suggestedBudgets) ? plan.suggestedBudgets : [];
@@ -42,12 +49,11 @@ function sanitizeFinancialPlan(plan) {
   };
 }
 
-// Get financial setup details
+/** GET / - Carrega as preferências financeiras e o último plano gerado pela IA. */
 router.get('/', async (req, res) => {
   try {
-    let setup = await database.get("SELECT * FROM financial_setup WHERE id = 1");
+    let setup = await database.get("SELECT * FROM financial_setup LIMIT 1");
     if (!setup) {
-      await database.run("INSERT OR IGNORE INTO financial_setup (id, financial_goals, monthly_income, savings_target_percent, ai_plan) VALUES (1, '', 0, 20, '')");
       setup = { financial_goals: '', monthly_income: 0, savings_target_percent: 20, ai_plan: '' };
     }
     if (setup.ai_plan) {
@@ -65,14 +71,20 @@ router.get('/', async (req, res) => {
   }
 });
 
-// Update financial setup details
+/** POST / - Atualiza a renda e objetivos de poupança sem necessariamente regerar o plano. */
 router.post('/', async (req, res) => {
   const { financial_goals, monthly_income, savings_target_percent } = req.body;
   try {
-    await database.run(
-      "UPDATE financial_setup SET financial_goals = ?, monthly_income = ?, savings_target_percent = ? WHERE id = 1",
+    const result = await database.run(
+      "UPDATE financial_setup SET financial_goals = ?, monthly_income = ?, savings_target_percent = ?",
       [financial_goals || '', parseFloat(monthly_income) || 0, parseFloat(savings_target_percent) || 20]
     );
+    if (result.changes === 0) {
+      await database.run(
+        "INSERT INTO financial_setup (financial_goals, monthly_income, savings_target_percent, ai_plan) VALUES (?, ?, ?, '')",
+        [financial_goals || '', parseFloat(monthly_income) || 0, parseFloat(savings_target_percent) || 20]
+      );
+    }
     res.json({ success: true, message: "Dados financeiros salvos com sucesso." });
   } catch (err) {
     console.error("Error in POST /api/financial-setup:", err);
@@ -80,16 +92,22 @@ router.post('/', async (req, res) => {
   }
 });
 
-// Save financial plan manually
+/** POST /save-plan - Permite que o Frontend sobrescreva o plano JSON gerado com alterações do usuário. */
 router.post('/save-plan', async (req, res) => {
   const { plan } = req.body;
   try {
     const parsedPlan = typeof plan === 'string' ? JSON.parse(plan) : plan;
     const sanitizedPlan = sanitizeFinancialPlan(parsedPlan);
-    await database.run(
-      "UPDATE financial_setup SET ai_plan = ? WHERE id = 1",
+    const result = await database.run(
+      "UPDATE financial_setup SET ai_plan = ?",
       [JSON.stringify(sanitizedPlan)]
     );
+    if (result.changes === 0) {
+      await database.run(
+        "INSERT INTO financial_setup (financial_goals, monthly_income, savings_target_percent, ai_plan) VALUES ('', 0, 20, ?)",
+        [JSON.stringify(sanitizedPlan)]
+      );
+    }
     res.json({ success: true, message: "Plano de orçamento salvo com sucesso.", plan: sanitizedPlan });
   } catch (err) {
     console.error("Error in POST /api/financial-setup/save-plan:", err);
@@ -97,10 +115,10 @@ router.post('/save-plan', async (req, res) => {
   }
 });
 
-// Generate financial budget plan with AI
+/** POST /generate-plan - Utiliza a IA Mestre de Orçamentos RPG para gerar metas financeiras. */
 router.post('/generate-plan', async (req, res) => {
   try {
-    const setup = await database.get("SELECT * FROM financial_setup WHERE id = 1");
+    const setup = await database.get("SELECT * FROM financial_setup LIMIT 1");
     if (!setup) {
       return res.status(400).json({ error: "Nenhum setup financeiro encontrado." });
     }
@@ -109,9 +127,11 @@ router.post('/generate-plan', async (req, res) => {
     const savings_target_percent = setup.savings_target_percent || 20;
 
     const config = await database.get("SELECT * FROM ai_config LIMIT 1");
-    if (!config || (!config.apiKey && config.provider !== 'ollama')) {
+    const dbApiKey = config.apiKey || config.apikey;
+    if (!config || (!dbApiKey && config.provider !== 'ollama')) {
       return res.status(400).json({ error: "Configuração de IA incompleta. Por favor, adicione sua Chave de API nas Configurações." });
     }
+    config.apiKey = decryptKey(dbApiKey);
 
     const systemPrompt = `Você é um Mestre de Orçamentos RPG e Assessor Financeiro IA gamificado.
 Sua missão é criar um plano de orçamento gamificado e 4 quests financeiras mensais para a Esfera Financeira do usuário.
@@ -181,8 +201,10 @@ Objetivos declarados pelo usuário: "${financial_goals || 'Nenhum objetivo espec
     const result = JSON.parse(cleanJsonStr);
     const sanitizedPlan = sanitizeFinancialPlan(result);
     
-    // Save to database
-    await database.run("UPDATE financial_setup SET ai_plan = ? WHERE id = 1", [JSON.stringify(sanitizedPlan)]);
+    const updateRes = await database.run("UPDATE financial_setup SET ai_plan = ?", [JSON.stringify(sanitizedPlan)]);
+    if (updateRes.changes === 0) {
+      await database.run("INSERT INTO financial_setup (financial_goals, monthly_income, savings_target_percent, ai_plan) VALUES ('', 0, 20, ?)", [JSON.stringify(sanitizedPlan)]);
+    }
 
     res.json({ success: true, plan: sanitizedPlan });
   } catch (error) {
@@ -191,7 +213,7 @@ Objetivos declarados pelo usuário: "${financial_goals || 'Nenhum objetivo espec
   }
 });
 
-// Claim XP for completed financial quest
+/** POST /claim-xp - Valida o cumprimento de uma meta financeira (Quest) e recompensa com XP na esfera Financeira. */
 router.post('/claim-xp', async (req, res) => {
   const { questId, questTitle, xp } = req.body;
   if (!questId || !questTitle) {
@@ -201,7 +223,7 @@ router.post('/claim-xp', async (req, res) => {
   
   try {
     // 1. Get setup and verify it has quests in the JSON plan
-    const setup = await database.get("SELECT ai_plan FROM financial_setup WHERE id = 1");
+    const setup = await database.get("SELECT ai_plan FROM financial_setup");
     if (!setup || !setup.ai_plan) {
       return res.status(400).json({ error: "Nenhum plano de orçamento ativo encontrado." });
     }
@@ -221,7 +243,7 @@ router.post('/claim-xp', async (req, res) => {
     quest.claimed = true;
     
     // 3. Save updated plan back to database
-    await database.run("UPDATE financial_setup SET ai_plan = ? WHERE id = 1", [JSON.stringify(plan)]);
+    await database.run("UPDATE financial_setup SET ai_plan = ?", [JSON.stringify(plan)]);
     
     // 4. Update the Financeiro sphere level/XP
     const sphereName = 'Financeiro';

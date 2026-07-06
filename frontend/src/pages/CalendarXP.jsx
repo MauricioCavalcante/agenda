@@ -1,4 +1,10 @@
-import React, { useContext } from 'react';
+/**
+ * Heatmap de XP (Histórico)
+ * 
+ * Renderiza um mapa de calor semelhante à contribuição do GitHub,
+ * visualizando o progresso e consistência diária do usuário.
+ */
+import React, { useContext, useEffect, useState } from 'react';
 import { Calendar, ChevronLeft, ChevronRight } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { AppContext, getTodayString } from '../context/AppContext';

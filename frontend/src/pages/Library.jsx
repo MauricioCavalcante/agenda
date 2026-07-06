@@ -1,5 +1,11 @@
+/**
+ * Biblioteca de Livros
+ * 
+ * Gerencia a coleção de livros do usuário. Conecta-se à IA para calcular
+ * a pontuação (XP) que cada leitura concederá.
+ */
 import React, { useContext } from 'react';
-import { BookOpen, Sparkles, Info, Trash2 } from 'lucide-react';
+import { BookOpen, Sparkles, Info, Trash2, RefreshCw } from 'lucide-react';
 import { AppContext } from '../context/AppContext';
 
 export default function Library() {
@@ -138,7 +144,11 @@ export default function Library() {
             className="btn"
             style={{ marginTop: '8px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}
           >
-            <Sparkles size={16} />
+            {addingBook ? (
+              <RefreshCw size={16} className="animate-spin" />
+            ) : (
+              <Sparkles size={16} />
+            )}
             {addingBook ? "Calculando XP com IA..." : "Adicionar Livro"}
           </button>
         </form>
@@ -162,8 +172,11 @@ export default function Library() {
         </div>
 
         {loadingBooks ? (
-          <div style={{ padding: '40px', textAlign: 'center', color: 'var(--text-muted)' }}>
-            Carregando biblioteca...
+          <div className="spinner-container">
+            <div className="spinner-ring"></div>
+            <p style={{ margin: 0, fontSize: '0.9rem', color: 'var(--text-secondary)' }}>
+              Carregando biblioteca...
+            </p>
           </div>
         ) : books.filter(b => (bookFilter === 'lido' ? b.completed : !b.completed)).length === 0 ? (
           <div style={{ padding: '40px', textAlign: 'center', color: 'var(--text-muted)', border: '1px dashed var(--border-color)', borderRadius: '12px' }}>

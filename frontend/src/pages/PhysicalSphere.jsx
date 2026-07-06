@@ -1,5 +1,11 @@
-import React, { useContext } from 'react';
-import { Dumbbell, Sparkles, Shield, Info, CheckCircle2 } from 'lucide-react';
+/**
+ * Esfera Física
+ * 
+ * Central de treinamento físico gamificada. Acompanha os treinos sugeridos
+ * pela Inteligência artificial e o histórico de exercícios.
+ */
+import React, { useContext, useState, useEffect } from 'react';
+import { Dumbbell, Sparkles, Shield, Info, CheckCircle2, RefreshCw } from 'lucide-react';
 import { AppContext } from '../context/AppContext';
 
 export default function PhysicalSphere() {
@@ -48,8 +54,9 @@ export default function PhysicalSphere() {
             onClick={handleSaveDesiredExercises}
             disabled={savingPhysicalSetup}
             className="btn btn-secondary"
-            style={{ padding: '10px 16px', flex: 1, minWidth: '150px' }}
+            style={{ padding: '10px 16px', flex: 1, minWidth: '150px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}
           >
+            {savingPhysicalSetup && <RefreshCw size={14} className="animate-spin" />}
             {savingPhysicalSetup ? "Salvando..." : "Salvar Exercícios"}
           </button>
 
@@ -59,7 +66,11 @@ export default function PhysicalSphere() {
             className="btn"
             style={{ background: 'var(--grad-physical)', flex: 1, minWidth: '180px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}
           >
-            <Sparkles size={16} />
+            {generatingPhysicalPlan ? (
+              <RefreshCw size={16} className="animate-spin" />
+            ) : (
+              <Sparkles size={16} />
+            )}
             {generatingPhysicalPlan ? "Gerando Treino..." : "Gerar Plano com IA"}
           </button>
         </div>

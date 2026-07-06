@@ -1,14 +1,24 @@
+/**
+ * Metas Recorrentes (Rotinas Fixas)
+ * 
+ * Responsável pelo CRUD de blocos de tempo que o usuário deseja inserir 
+ * automaticamente em seus dias vazios ao longo da semana.
+ */
 import express from 'express';
 import database from '../../database.js';
 
 const router = express.Router();
 
-// Get user goals list
+/**
+ * GET /
+ * Retorna a lista de metas ativas.
+ */
 router.get('/', async (req, res) => {
   try {
     const goals = await database.all("SELECT * FROM user_goals");
     res.json(goals.map(g => ({
       ...g,
+      durationMins: g.durationMins || g.durationmins, // Handle SQLite camelCase or Postgres lowercase
       active: !!g.active
     })));
   } catch (err) {
@@ -17,7 +27,10 @@ router.get('/', async (req, res) => {
   }
 });
 
-// Add a user goal
+/**
+ * POST /
+ * Insere uma nova meta recorrente na base.
+ */
 router.post('/', async (req, res) => {
   const { title, durationMins, sphere, frequency } = req.body;
   if (!title || !durationMins || !sphere || !frequency) {
@@ -34,6 +47,7 @@ router.post('/', async (req, res) => {
     const goals = await database.all("SELECT * FROM user_goals");
     res.json(goals.map(g => ({
       ...g,
+      durationMins: g.durationMins || g.durationmins,
       active: !!g.active
     })));
   } catch (err) {
@@ -42,7 +56,10 @@ router.post('/', async (req, res) => {
   }
 });
 
-// Delete a user goal
+/**
+ * POST /delete
+ * Exclui permanentemente uma meta recorrente.
+ */
 router.post('/delete', async (req, res) => {
   const { id } = req.body;
   if (!id) {
@@ -55,6 +72,7 @@ router.post('/delete', async (req, res) => {
     const goals = await database.all("SELECT * FROM user_goals");
     res.json(goals.map(g => ({
       ...g,
+      durationMins: g.durationMins || g.durationmins,
       active: !!g.active
     })));
   } catch (err) {
@@ -63,7 +81,10 @@ router.post('/delete', async (req, res) => {
   }
 });
 
-// Update a user goal
+/**
+ * POST /update
+ * Atualiza propriedades (duração, esfera, título) de uma meta existente.
+ */
 router.post('/update', async (req, res) => {
   const { id, title, durationMins, sphere, frequency } = req.body;
   if (!id || !title || !durationMins || !sphere || !frequency) {
@@ -79,6 +100,7 @@ router.post('/update', async (req, res) => {
     const goals = await database.all("SELECT * FROM user_goals");
     res.json(goals.map(g => ({
       ...g,
+      durationMins: g.durationMins || g.durationmins,
       active: !!g.active
     })));
   } catch (err) {

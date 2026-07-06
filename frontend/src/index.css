@@ -1485,6 +1485,7 @@ input:focus, select:focus, textarea:focus {
   display: inline-flex;
   align-items: center;
   gap: 4px;
+  font-synthesis: none;
   font-size: 0.75rem;
   font-weight: 700;
   color: var(--color-professional);
@@ -1493,4 +1494,197 @@ input:focus, select:focus, textarea:focus {
   border-radius: 4px;
   border: 1px solid hsla(158, 82%, 46%, 0.25);
 }
+
+/* Spinner & Loading Classes */
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.animate-spin {
+  animation: spin 1s linear infinite;
+}
+
+.spinner-container {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 40px;
+  color: var(--text-secondary);
+  gap: 12px;
+}
+
+.spinner-ring {
+  width: 32px;
+  height: 32px;
+  border: 3px solid var(--border-color);
+  border-top-color: var(--color-system);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+.spinner-ring.small {
+  width: 16px;
+  height: 16px;
+  border-width: 2px;
+}
+
+/* Glassmorphic Full overlay loader */
+.global-loader-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: var(--modal-overlay);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  z-index: 9999;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  animation: fadeIn 0.3s ease;
+}
+
+.global-loader-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  box-shadow: 0 8px 32px 0 var(--shadow-card);
+  border-radius: 16px;
+  padding: 32px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 20px;
+  max-width: 320px;
+  width: 90%;
+  text-align: center;
+}
+
+.loader-orb {
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  background: radial-gradient(circle, var(--color-system) 0%, transparent 70%);
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 0 20px var(--color-system);
+  animation: pulseGlow 2s infinite ease-in-out;
+}
+
+.loader-orb::after {
+  content: '';
+  position: absolute;
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  border: 3px dashed var(--color-system);
+  animation: spin 6s linear infinite;
+}
+
+@keyframes pulseGlow {
+  0%, 100% {
+    transform: scale(0.95);
+    box-shadow: 0 0 15px var(--color-system);
+    opacity: 0.8;
+  }
+  50% {
+    transform: scale(1.05);
+    box-shadow: 0 0 30px var(--color-system);
+    opacity: 1;
+  }
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+/* Dropdown Menu Styles */
+.nav-dropdown {
+  position: relative;
+  display: inline-block;
+}
+
+.nav-dropdown-menu {
+  display: none;
+  position: absolute;
+  top: 100%;
+  right: 0;
+  margin-top: 6px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border-radius: 10px;
+  padding: 6px;
+  min-width: 200px;
+  box-shadow: 0 8px 32px var(--shadow-card);
+  z-index: 200;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.nav-dropdown:hover .nav-dropdown-menu {
+  display: flex;
+}
+
+.nav-dropdown-item {
+  width: 100%;
+  text-align: left;
+  padding: 8px 12px;
+  font-size: 0.85rem;
+  border-radius: 6px;
+  background: transparent;
+  border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  transition: all 0.2s;
+}
+
+.nav-dropdown-item:hover {
+  background: var(--bg-sub-card);
+  color: var(--text-primary);
+}
+
+.nav-dropdown-item.active {
+  background: var(--border-highlight);
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+@media (max-width: 992px) {
+  .nav-dropdown {
+    width: 100%;
+  }
+  .nav-dropdown-menu {
+    position: static;
+    display: flex;
+    box-shadow: none;
+    background: transparent;
+    border: none;
+    padding: 0 0 0 12px;
+    margin-top: 4px;
+    width: 100%;
+  }
+  .nav-dropdown-item {
+    font-size: 0.8rem;
+    padding: 6px 8px;
+  }
+}
+
+
 

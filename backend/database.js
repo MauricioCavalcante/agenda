@@ -1,205 +1,140 @@
-import sqlite3 from 'sqlite3';
-import path from 'path';
-import fs from 'fs';
-import { fileURLToPath } from 'url';
+/**
+ * Camada de Acesso a Dados (Data Access Layer) - Supabase Edition
+ * 
+ * Responsável por:
+ * - Gerenciar a conexão principal via PostgreSQL (Supabase)
+ * - Injetar o contexto de segurança RLS (Row Level Security) usando o userId
+ */
+import pg from 'pg';
+import { AsyncLocalStorage } from 'async_hooks';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+const { Pool } = pg;
 
-const DATA_DIR = process.env.DATA_DIR || path.resolve(__dirname, '../data');
-const DB_PATH = path.join(DATA_DIR, 'agenda.db');
+export const dbContext = new AsyncLocalStorage();
 
-// Ensure data directory exists
-if (!fs.existsSync(DATA_DIR)) {
-  fs.mkdirSync(DATA_DIR, { recursive: true });
+export function runInContext(fn) {
+  return dbContext.run(new Map(), fn);
 }
 
-// Connect to SQLite Database
-const db = new sqlite3.Database(DB_PATH, (err) => {
-  if (err) {
-    console.error('Error opening SQLite database:', err);
-  } else {
-    console.log(`Connected to SQLite database at ${DB_PATH}`);
-  }
-});
+let pgPool = null;
 
-// Helper wrapper functions for async/await
-export function run(sql, params = []) {
-  return new Promise((resolve, reject) => {
-    db.run(sql, params, function (err) {
-      if (err) {
-        reject(err);
-      } else {
-        resolve({ lastID: this.lastID, changes: this.changes });
-      }
-    });
+export async function initPool() {
+  if (pgPool) return true;
+  
+  const connectionString = process.env.SUPABASE_DB_URL || process.env.DATABASE_URL;
+  if (!connectionString) {
+    console.error("ERRO CRÍTICO: Variável SUPABASE_DB_URL não encontrada no .env");
+    return false;
+  }
+
+  pgPool = new Pool({
+    connectionString,
+    ssl: { rejectUnauthorized: false }
   });
+
+  try {
+    const client = await pgPool.connect();
+    
+    // Criar a tabela todos se ela não existir
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS todos (
+        id TEXT,
+        user_id UUID DEFAULT (NULLIF(current_setting('request.jwt.claim.sub', true), '')::uuid) REFERENCES auth.users(id) ON DELETE CASCADE,
+        title TEXT NOT NULL,
+        label TEXT NOT NULL,
+        sphere TEXT NOT NULL,
+        xp INTEGER DEFAULT 10,
+        completed INTEGER DEFAULT 0,
+        parent_id TEXT,
+        description TEXT DEFAULT '',
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()),
+        done_at TIMESTAMP WITH TIME ZONE,
+        PRIMARY KEY (id, user_id)
+      );
+    `);
+
+    // Garantir colunas adicionais para subtarefas e descrição se a tabela já existia
+    await client.query(`ALTER TABLE todos ADD COLUMN IF NOT EXISTS parent_id TEXT;`);
+    await client.query(`ALTER TABLE todos ADD COLUMN IF NOT EXISTS description TEXT DEFAULT '';`);
+
+    // Habilitar RLS
+    await client.query(`ALTER TABLE todos ENABLE ROW LEVEL SECURITY;`);
+
+    // Criar política de RLS se não existir
+    try {
+      await client.query(`
+        CREATE POLICY "Users can manage own todos" ON todos
+        FOR ALL USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);
+      `);
+    } catch (e) {
+      // A política já pode existir, o que é esperado nas inicializações subsequentes
+    }
+
+    client.release();
+    console.log("Conectado com sucesso ao Supabase PostgreSQL e tabela 'todos' verificada.");
+    return true;
+  } catch (err) {
+    console.error('Falha ao conectar no Supabase PostgreSQL:', err);
+    return false;
+  }
+}
+
+/**
+ * Helper para executar queries com contexto RLS do Supabase.
+ * Injeta o user_id atual na variável de sessão do Postgres para que as políticas RLS funcionem.
+ */
+async function executeWithRls(sql, params = []) {
+  if (!pgPool) await initPool();
+
+  const store = dbContext.getStore();
+  const userId = store ? store.get('userId') : null;
+  const client = await pgPool.connect();
+
+  try {
+    // Se o usuário estiver autenticado, aplica o RLS localmente usando uma transação
+    if (userId) {
+      await client.query('BEGIN');
+      await client.query(`SELECT set_config('request.jwt.claim.sub', $1, true)`, [userId]);
+      await client.query(`SET LOCAL ROLE authenticated`);
+      // Convert SQLite ? syntax to PG $1 syntax if needed
+      let index = 1;
+      const pgSql = sql.replace(/\?/g, () => `$${index++}`);
+      const res = await client.query(pgSql, params);
+      await client.query('COMMIT');
+      return res;
+    } else {
+      // Sem usuário autenticado (bypass / admin ou rota não protegida)
+      let index = 1;
+      const pgSql = sql.replace(/\?/g, () => `$${index++}`);
+      return await client.query(pgSql, params);
+    }
+  } catch (err) {
+    if (userId) await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+export function run(sql, params = []) {
+  return executeWithRls(sql, params).then(res => ({ changes: res.rowCount }));
 }
 
 export function get(sql, params = []) {
-  return new Promise((resolve, reject) => {
-    db.get(sql, params, (err, row) => {
-      if (err) {
-        reject(err);
-      } else {
-        resolve(row);
-      }
-    });
-  });
+  return executeWithRls(sql, params).then(res => res.rows[0]);
 }
 
 export function all(sql, params = []) {
-  return new Promise((resolve, reject) => {
-    db.all(sql, params, (err, rows) => {
-      if (err) {
-        reject(err);
-      } else {
-        resolve(rows);
-      }
-    });
-  });
+  return executeWithRls(sql, params).then(res => res.rows || []);
 }
 
 export function exec(sql) {
-  return new Promise((resolve, reject) => {
-    db.exec(sql, (err) => {
-      if (err) {
-        reject(err);
-      } else {
-        resolve();
-      }
-    });
-  });
+  return executeWithRls(sql, []);
 }
 
-// Close helper
 export function close() {
-  return new Promise((resolve, reject) => {
-    db.close((err) => {
-      if (err) reject(err);
-      else resolve();
-    });
-  });
-}
-
-// Initialize tables schema
-export async function initSchema() {
-  const schema = `
-    CREATE TABLE IF NOT EXISTS stats (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      character_level INTEGER DEFAULT 1
-    );
-
-    CREATE TABLE IF NOT EXISTS spheres (
-      name TEXT PRIMARY KEY,
-      level INTEGER DEFAULT 1,
-      xp INTEGER DEFAULT 0
-    );
-
-    CREATE TABLE IF NOT EXISTS history (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      date TEXT NOT NULL,
-      taskId TEXT NOT NULL,
-      title TEXT NOT NULL,
-      sphere TEXT NOT NULL,
-      xpEarned INTEGER NOT NULL,
-      description TEXT,
-      timestamp TEXT NOT NULL
-    );
-
-    CREATE TABLE IF NOT EXISTS schedules (
-      id TEXT PRIMARY KEY,
-      date TEXT NOT NULL,
-      startTime TEXT NOT NULL,
-      endTime TEXT NOT NULL,
-      duration TEXT,
-      title TEXT NOT NULL,
-      sphere TEXT NOT NULL,
-      xp INTEGER NOT NULL,
-      completed INTEGER DEFAULT 0,
-      description TEXT,
-      doneAt TEXT,
-      isMeeting INTEGER DEFAULT 0,
-      parentId TEXT
-    );
-
-    CREATE TABLE IF NOT EXISTS ai_config (
-      provider TEXT PRIMARY KEY,
-      apiKey TEXT,
-      model TEXT,
-      apiEndpoint TEXT
-    );
-
-    CREATE TABLE IF NOT EXISTS user_goals (
-      id TEXT PRIMARY KEY,
-      title TEXT NOT NULL,
-      durationMins INTEGER NOT NULL,
-      sphere TEXT NOT NULL,
-      frequency TEXT NOT NULL,
-      active INTEGER DEFAULT 1
-    );
-
-    CREATE TABLE IF NOT EXISTS physical_setup (
-      id INTEGER PRIMARY KEY DEFAULT 1,
-      desired_exercises TEXT,
-      ai_plan TEXT
-    );
-
-    CREATE TABLE IF NOT EXISTS financial_setup (
-      id INTEGER PRIMARY KEY DEFAULT 1,
-      financial_goals TEXT,
-      monthly_income REAL DEFAULT 0,
-      savings_target_percent REAL DEFAULT 20,
-      ai_plan TEXT
-    );
-
-    CREATE TABLE IF NOT EXISTS books (
-      id TEXT PRIMARY KEY,
-      title TEXT NOT NULL,
-      author TEXT,
-      sphere TEXT NOT NULL,
-      pages INTEGER,
-      goal TEXT,
-      depth TEXT,
-      xp INTEGER DEFAULT 0,
-      xp_reason TEXT,
-      completed INTEGER DEFAULT 0,
-      doneAt TEXT
-    );
-  `;
-  await exec(schema);
-
-  // Seed initial stats if not existing
-  const statsCount = await get("SELECT COUNT(*) as count FROM stats");
-  if (statsCount.count === 0) {
-    await run("INSERT INTO stats (character_level) VALUES (1)");
-  }
-
-  // Seed initial spheres if not existing
-  await run("INSERT OR IGNORE INTO spheres (name, level, xp) VALUES ('Profissional', 1, 0)");
-  await run("INSERT OR IGNORE INTO spheres (name, level, xp) VALUES ('Educacional', 1, 0)");
-  await run("INSERT OR IGNORE INTO spheres (name, level, xp) VALUES ('Pessoal', 1, 0)");
-  await run("INSERT OR IGNORE INTO spheres (name, level, xp) VALUES ('Físico', 1, 0)");
-  await run("INSERT OR IGNORE INTO spheres (name, level, xp) VALUES ('Financeiro', 1, 0)");
-  await run("INSERT OR IGNORE INTO spheres (name, level, xp) VALUES ('Social', 1, 0)");
-
-  // Seed default ai_config if not existing
-  const aiCount = await get("SELECT COUNT(*) as count FROM ai_config");
-  if (aiCount.count === 0) {
-    await run("INSERT INTO ai_config (provider, apiKey, model, apiEndpoint) VALUES ('openai', '', 'gpt-4o-mini', 'https://api.openai.com/v1')");
-  }
-
-  // Seed initial physical_setup if not existing
-  const physCount = await get("SELECT COUNT(*) as count FROM physical_setup");
-  if (physCount.count === 0) {
-    await run("INSERT INTO physical_setup (id, desired_exercises, ai_plan) VALUES (1, '', '')");
-  }
-
-  // Seed initial financial_setup if not existing
-  const finSetupCount = await get("SELECT COUNT(*) as count FROM financial_setup");
-  if (finSetupCount.count === 0) {
-    await run("INSERT INTO financial_setup (id, financial_goals, monthly_income, savings_target_percent, ai_plan) VALUES (1, '', 0, 20, '')");
-  }
+  if (pgPool) return pgPool.end();
+  return Promise.resolve();
 }
 
 export default {
@@ -208,6 +143,6 @@ export default {
   all,
   exec,
   close,
-  initSchema,
-  DB_PATH
+  runInContext,
+  initPool
 };

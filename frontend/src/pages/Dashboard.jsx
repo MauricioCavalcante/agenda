@@ -1,4 +1,10 @@
-import React, { useContext } from 'react';
+/**
+ * Dashboard (Página Inicial)
+ * 
+ * Visão principal do dia. Renderiza a timeline de atividades diárias,
+ * tarefas pendentes e status atual das esferas do usuário.
+ */
+import React, { useContext, useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { 
   Shield, 
@@ -17,7 +23,9 @@ import {
   Sparkles,
   Dumbbell,
   Coins,
-  Users
+  Users,
+  Circle,
+  Tag
 } from 'lucide-react';
 import { AppContext, getTodayString } from '../context/AppContext';
 
@@ -64,6 +72,7 @@ const formatDisplayDate = (dateStr) => {
 export default function Dashboard() {
   const navigate = useNavigate();
   const {
+    session,
     stats,
     date,
     schedule,
@@ -79,6 +88,8 @@ export default function Dashboard() {
     setMeetEnd,
     meetSphere,
     setMeetSphere,
+    meetParentId,
+    setMeetParentId,
     aiPromptNote,
     setAiPromptNote,
     aiGenerating,
@@ -97,7 +108,9 @@ export default function Dashboard() {
     setCompletionTask,
     setCompletionDesc,
     changeDate,
-    fetchSchedule
+    fetchSchedule,
+    todos,
+    handleCompleteTodo
   } = useContext(AppContext);
 
   // Filter tasks out that have parentId to render them nested
@@ -116,7 +129,7 @@ export default function Dashboard() {
               {stats?.characterLevel || 1}
             </div>
             <div className="char-title">
-              <h2>Maurício</h2>
+              <h2>{session?.user?.user_metadata?.full_name || 'Aventureiro(a)'}</h2>
               <p>{stats?.title || 'Iniciante'}</p>
             </div>
           </div>
@@ -258,7 +271,7 @@ export default function Dashboard() {
                   {name === 'Físico' && (
                     <div style={{ marginTop: '4px', display: 'flex', justifyContent: 'flex-start' }}>
                       <a 
-                        href="#/physical"
+                        href="/physical"
                         onClick={(e) => {
                           e.preventDefault();
                           navigate('/physical');
@@ -285,7 +298,7 @@ export default function Dashboard() {
                   {name === 'Financeiro' && (
                     <div style={{ marginTop: '4px', display: 'flex', justifyContent: 'flex-start' }}>
                       <a 
-                        href="#/financial"
+                        href="/financial"
                         onClick={(e) => {
                           e.preventDefault();
                           navigate('/financial');
@@ -426,6 +439,20 @@ export default function Dashboard() {
               </select>
             </div>
 
+            {actionTab === 'fixed' && (
+              <div className="form-group full">
+                <label>Tarefa Principal Relacionada (Para atividade paralela)</label>
+                <select value={meetParentId || ''} onChange={(e) => setMeetParentId(e.target.value || null)}>
+                  <option value="">Nenhuma (Atividade normal)</option>
+                  {schedule.filter(t => !t.parentId).map(t => (
+                    <option key={t.id} value={t.id}>
+                      [{t.startTime} - {t.endTime}] {t.title}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+
             <button type="submit" className="btn">
               {actionTab === 'meeting' ? 'Reorganizar com Reunião' : 'Inserir Horário Fixo'}
             </button>
@@ -473,8 +500,11 @@ export default function Dashboard() {
           </h3>
 
           {loading ? (
-            <div style={{ padding: '40px', textAlign: 'center', color: 'var(--text-muted)' }}>
-              Carregando sua grade de horários...
+            <div className="spinner-container">
+              <div className="spinner-ring"></div>
+              <p style={{ margin: 0, fontSize: '0.9rem', color: 'var(--text-secondary)' }}>
+                Carregando sua grade de horários...
+              </p>
             </div>
           ) : schedule.length === 0 ? (
             <div style={{ padding: '40px', textAlign: 'center', color: 'var(--text-muted)' }}>
@@ -632,6 +662,94 @@ export default function Dashboard() {
                       )}
 
                     </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+
+        {/* Quick Todo Widget */}
+        <div className="glass-panel" style={{ padding: '24px' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+            <h3 style={{ margin: 0, fontSize: '1.1rem', fontWeight: '600', display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <CheckCircle2 size={18} style={{ color: 'var(--color-system)' }} />
+              Tarefas Rápidas
+            </h3>
+            <button 
+              onClick={() => navigate('/todos')} 
+              className="btn btn-secondary" 
+              style={{ padding: '4px 10px', fontSize: '0.75rem' }}
+            >
+              Gerenciar Todas →
+            </button>
+          </div>
+
+          {todos.filter(t => !t.completed).length === 0 ? (
+            <div style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '20px', border: '1px dashed var(--border-color)', borderRadius: '8px' }}>
+              Nenhuma tarefa pendente! Bom trabalho, herói! 🏆
+            </div>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+              {todos.filter(t => !t.completed).slice(0, 5).map(todo => {
+                const sphereClass = getSphereClass(todo.sphere);
+                return (
+                  <div 
+                    key={todo.id} 
+                    className={`task-card glass-panel ${sphereClass}`}
+                    style={{ 
+                      padding: '10px 14px', 
+                      display: 'flex', 
+                      alignItems: 'center', 
+                      justifyContent: 'space-between',
+                      gap: '10px'
+                    }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flex: 1 }}>
+                      <button
+                        onClick={() => handleCompleteTodo(todo.id)}
+                        style={{
+                          background: 'none',
+                          border: 'none',
+                          cursor: 'pointer',
+                          padding: 0,
+                          color: 'var(--text-secondary)',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          transition: 'transform 0.1s'
+                        }}
+                        title="Marcar como concluída"
+                        onMouseDown={(e) => e.currentTarget.style.transform = 'scale(0.9)'}
+                        onMouseUp={(e) => e.currentTarget.style.transform = 'scale(1)'}
+                      >
+                        <Circle size={18} className="hover-scale" style={{ color: 'var(--border-color)' }} />
+                      </button>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', textAlign: 'left' }}>
+                        <span style={{ fontSize: '0.9rem', fontWeight: '600' }}>{todo.title}</span>
+                        {todo.description && (
+                          <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', fontStyle: 'italic', display: 'block', maxWidth: '200px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            {todo.description}
+                          </span>
+                        )}
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+                          <span style={{ fontSize: '0.75rem', color: 'var(--color-system)', fontWeight: '600', background: 'rgba(33, 150, 243, 0.08)', padding: '1px 6px', borderRadius: '4px', display: 'inline-flex', alignItems: 'center', gap: '2px' }}>
+                            <Tag size={8} /> {todo.label}
+                          </span>
+                          <span className="sphere-tag" style={{ fontSize: '0.65rem', padding: '1px 5px' }}>
+                            {todo.sphere}
+                          </span>
+                          {todo.parentId && (
+                            <span style={{ fontSize: '0.65rem', color: 'var(--text-muted)' }}>
+                              ↳ Subtarefa
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                    <span className="xp-badge" style={{ fontSize: '0.7rem', padding: '3px 6px', background: `var(--grad-${sphereClass})`, color: '#fff' }}>
+                      +{todo.xp} XP
+                    </span>
                   </div>
                 );
               })}

@@ -1,10 +1,16 @@
+/**
+ * Esfera Física (Corpo)
+ * 
+ * Responsável por gerenciar os treinos gerados pela IA e a progressão dos exercícios no perfil do usuário.
+ */
 import express from 'express';
 import database from '../../database.js';
 import { callLLM } from '../services/aiService.js';
+import { decryptKey } from '../utils/crypto.js';
 
 const router = express.Router();
 
-// Function to sanitize physical plan JSON structure
+/** Sanitiza e formata os nós do plano de treino em JSON. */
 function sanitizePhysicalPlan(plan) {
   if (!plan) return { generalNotes: "", workouts: [] };
   const workouts = Array.isArray(plan.workouts) ? plan.workouts : [];
@@ -51,12 +57,11 @@ function sanitizePhysicalPlan(plan) {
   };
 }
 
-// Get physical setup details
+/** GET / - Retorna as preferências do usuário e o seu plano de treino atual. */
 router.get('/', async (req, res) => {
   try {
-    let setup = await database.get("SELECT * FROM physical_setup WHERE id = 1");
+    let setup = await database.get("SELECT * FROM physical_setup LIMIT 1");
     if (!setup) {
-      await database.run("INSERT OR IGNORE INTO physical_setup (id, desired_exercises, ai_plan) VALUES (1, '', '')");
       setup = { desired_exercises: '', ai_plan: '' };
     }
     // Return setup with sanitized ai_plan if parsed successfully
@@ -75,14 +80,20 @@ router.get('/', async (req, res) => {
   }
 });
 
-// Update physical setup desired exercises
+/** POST / - Salva exercícios ou foco específicos do usuário. */
 router.post('/', async (req, res) => {
   const { desired_exercises } = req.body;
   try {
-    await database.run(
-      "UPDATE physical_setup SET desired_exercises = ? WHERE id = 1",
+    const result = await database.run(
+      "UPDATE physical_setup SET desired_exercises = ?",
       [desired_exercises || '']
     );
+    if (result.changes === 0) {
+      await database.run(
+        "INSERT INTO physical_setup (desired_exercises, ai_plan) VALUES (?, '')",
+        [desired_exercises || '']
+      );
+    }
     res.json({ success: true, message: "Exercícios desejados salvos com sucesso." });
   } catch (err) {
     console.error("Error in POST /api/physical-setup:", err);
@@ -90,16 +101,22 @@ router.post('/', async (req, res) => {
   }
 });
 
-// Save physical workout plan manually
+/** POST /save-plan - Atualiza manualmente o JSON (usado para salvar progresso de treino, ex: completou 3 de 10 reps). */
 router.post('/save-plan', async (req, res) => {
   const { plan } = req.body;
   try {
     const parsedPlan = typeof plan === 'string' ? JSON.parse(plan) : plan;
     const sanitizedPlan = sanitizePhysicalPlan(parsedPlan);
-    await database.run(
-      "UPDATE physical_setup SET ai_plan = ? WHERE id = 1",
+    const result = await database.run(
+      "UPDATE physical_setup SET ai_plan = ?",
       [JSON.stringify(sanitizedPlan)]
     );
+    if (result.changes === 0) {
+      await database.run(
+        "INSERT INTO physical_setup (desired_exercises, ai_plan) VALUES ('', ?)",
+        [JSON.stringify(sanitizedPlan)]
+      );
+    }
     res.json({ success: true, message: "Plano de treino salvo com sucesso.", plan: sanitizedPlan });
   } catch (err) {
     console.error("Error in POST /api/physical-setup/save-plan:", err);
@@ -107,16 +124,18 @@ router.post('/save-plan', async (req, res) => {
   }
 });
 
-// Generate physical workout plan with AI
+/** POST /generate-plan - Aciona a IA (Personal Trainer) para desenvolver uma rotina de treino customizada. */
 router.post('/generate-plan', async (req, res) => {
   try {
-    const setup = await database.get("SELECT desired_exercises FROM physical_setup WHERE id = 1");
+    const setup = await database.get("SELECT desired_exercises FROM physical_setup LIMIT 1");
     const desired_exercises = setup ? setup.desired_exercises : '';
 
     const config = await database.get("SELECT * FROM ai_config LIMIT 1");
-    if (!config || (!config.apiKey && config.provider !== 'ollama')) {
+    const dbApiKey = config.apiKey || config.apikey;
+    if (!config || (!dbApiKey && config.provider !== 'ollama')) {
       return res.status(400).json({ error: "Configuração de IA incompleta. Por favor, adicione sua Chave de API nas Configurações." });
     }
+    config.apiKey = decryptKey(dbApiKey);
 
     const systemPrompt = `Você é um Personal Trainer IA especializado em calistenia, musculação, corrida e condicionamento físico.
 Sua missão é criar um plano de treino semanal/rotina detalhado e estruturado para o usuário, com foco em desenvolvimento e saúde física (Esfera Físico).
@@ -186,8 +205,10 @@ Formato JSON esperado:
     const result = JSON.parse(cleanJsonStr);
     const sanitizedPlan = sanitizePhysicalPlan(result);
     
-    // Save to database
-    await database.run("UPDATE physical_setup SET ai_plan = ? WHERE id = 1", [JSON.stringify(sanitizedPlan)]);
+    const updateRes = await database.run("UPDATE physical_setup SET ai_plan = ?", [JSON.stringify(sanitizedPlan)]);
+    if (updateRes.changes === 0) {
+      await database.run("INSERT INTO physical_setup (desired_exercises, ai_plan) VALUES ('', ?)", [JSON.stringify(sanitizedPlan)]);
+    }
 
     res.json({ success: true, plan: sanitizedPlan });
   } catch (error) {

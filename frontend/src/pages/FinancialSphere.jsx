@@ -1,5 +1,11 @@
+/**
+ * Esfera Financeira
+ * 
+ * Visualização gamificada das finanças. Permite configurar renda,
+ * metas de poupança e realizar missões de controle de gastos (Quests) sugeridas pela IA.
+ */
 import React, { useContext } from 'react';
-import { Coins, Sparkles, Info, Award } from 'lucide-react';
+import { Coins, Sparkles, Info, Award, RefreshCw } from 'lucide-react';
 import { AppContext } from '../context/AppContext';
 
 export default function FinancialSphere() {
@@ -79,8 +85,9 @@ export default function FinancialSphere() {
             onClick={handleSaveFinancialSetup}
             disabled={savingFinSetup}
             className="btn btn-secondary"
-            style={{ padding: '10px 16px', flex: 1, minWidth: '130px' }}
+            style={{ padding: '10px 16px', flex: 1, minWidth: '130px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}
           >
+            {savingFinSetup && <RefreshCw size={14} className="animate-spin" />}
             {savingFinSetup ? "Salvando..." : "Salvar Dados"}
           </button>
 
@@ -90,7 +97,11 @@ export default function FinancialSphere() {
             className="btn"
             style={{ background: 'var(--grad-financial)', flex: 1, minWidth: '180px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}
           >
-            <Sparkles size={16} />
+            {generatingFinPlan ? (
+              <RefreshCw size={16} className="animate-spin" />
+            ) : (
+              <Sparkles size={16} />
+            )}
             {generatingFinPlan ? "Gerando Plano..." : "Gerar Orçamento RPG"}
           </button>
         </div>

@@ -1,6 +1,33 @@
-import React, { useContext } from 'react';
+/**
+ * Metas Recorrentes
+ * 
+ * Painel de configuração de tarefas de repetição contínua (estudos diários,
+ * blocos de trabalho fixos, pausas de almoço) que serão encaixadas pela IA.
+ */
+import React, { useContext, useState, useEffect } from 'react';
 import { Target, Edit2, Trash2, PlusCircle } from 'lucide-react';
 import { AppContext } from '../context/AppContext';
+
+const DAYS_MAP = [
+  { val: '0', label: 'D' },
+  { val: '1', label: 'S' },
+  { val: '2', label: 'T' },
+  { val: '3', label: 'Q' },
+  { val: '4', label: 'Q' },
+  { val: '5', label: 'S' },
+  { val: '6', label: 'S' },
+];
+
+const formatFrequency = (freq) => {
+  if (!freq || typeof freq !== 'string') return freq;
+  if (!/^[0-6](,[0-6])*$/.test(freq)) return freq; 
+  const names = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
+  const days = freq.split(',');
+  if (days.length === 7) return 'Todos os dias';
+  if (days.length === 5 && !days.includes('0') && !days.includes('6')) return 'Dias úteis';
+  if (days.length === 2 && days.includes('0') && days.includes('6')) return 'Finais de semana';
+  return days.map(d => names[Number(d)]).join(', ');
+};
 
 export default function RecurringGoals() {
   const {
@@ -73,7 +100,7 @@ export default function RecurringGoals() {
                       {goal.sphere}
                     </span>
                     <span>⏱️ Duração: {goal.durationMins} mins</span>
-                    <span>📅 Frequência: {goal.frequency}</span>
+                    <span>📅 Frequência: {formatFrequency(goal.frequency)}</span>
                   </div>
                 </div>
                 <div style={{ display: 'flex', gap: '8px' }}>
@@ -141,6 +168,8 @@ export default function RecurringGoals() {
               <option value="60">1 hora</option>
               <option value="90">1h 30m</option>
               <option value="120">2 horas</option>
+              <option value="240">4 horas</option>
+              <option value="480">8 horas</option>
             </select>
           </div>
 
@@ -157,14 +186,56 @@ export default function RecurringGoals() {
           </div>
 
           <div className="form-group">
-            <label>Frequência Desejada</label>
-            <select value={goalFreq} onChange={(e) => setGoalFreq(e.target.value)}>
-              <option value="Todos os dias">Todos os dias</option>
-              <option value="Somente dias úteis">Somente dias úteis (Segunda a Sexta)</option>
-              <option value="Finais de semana">Somente finais de semana</option>
-              <option value="3x por semana">3 vezes por semana</option>
-              <option value="2x por semana">2 vezes por semana</option>
-            </select>
+            <label>Dias da Semana</label>
+            <div style={{ display: 'flex', gap: '8px', justifyContent: 'center', marginTop: '4px' }}>
+              {DAYS_MAP.map(day => {
+                let selected = [];
+                if (/^[0-6](,[0-6])*$/.test(goalFreq)) {
+                  selected = goalFreq.split(',');
+                } else {
+                  if (goalFreq === 'Todos os dias') selected = ['0','1','2','3','4','5','6'];
+                  else if (goalFreq === 'Somente dias úteis') selected = ['1','2','3','4','5'];
+                  else if (goalFreq === 'Finais de semana') selected = ['0','6'];
+                  else if (goalFreq === '3x por semana') selected = ['1','3','5'];
+                  else if (goalFreq === '2x por semana') selected = ['2','4'];
+                  else if (goalFreq === '1x por semana') selected = ['6'];
+                }
+
+                const isActive = selected.includes(day.val);
+
+                const toggleDay = () => {
+                  let newSel = [...selected];
+                  if (newSel.includes(day.val)) {
+                    newSel = newSel.filter(x => x !== day.val);
+                  } else {
+                    newSel.push(day.val);
+                  }
+                  newSel.sort();
+                  if (newSel.length === 0) newSel = ['0','1','2','3','4','5','6']; 
+                  setGoalFreq(newSel.join(','));
+                };
+
+                return (
+                  <button
+                    key={day.val}
+                    type="button"
+                    onClick={toggleDay}
+                    style={{
+                      width: '38px', height: '38px', borderRadius: '50%',
+                      border: isActive ? 'none' : '1px solid var(--border-color)',
+                      background: isActive ? 'var(--color-system)' : 'transparent',
+                      color: isActive ? '#fff' : 'var(--text-secondary)',
+                      fontWeight: isActive ? 'bold' : 'normal',
+                      cursor: 'pointer',
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      transition: 'all 0.2s'
+                    }}
+                  >
+                    {day.label}
+                  </button>
+                );
+              })}
+            </div>
           </div>
 
           <div style={{ display: 'flex', gap: '10px', marginTop: '8px' }}>
@@ -180,7 +251,7 @@ export default function RecurringGoals() {
                   setGoalTitle('');
                   setGoalDuration(30);
                   setGoalSphere('Profissional');
-                  setGoalFreq('Todos os dias');
+                  setGoalFreq('0,1,2,3,4,5,6');
                 }}
                 style={{ flex: 1 }}
               >

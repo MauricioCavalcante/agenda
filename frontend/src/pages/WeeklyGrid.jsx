@@ -1,4 +1,10 @@
-import React from 'react';
+/**
+ * Calendário Semanal (Weekly Grid)
+ * 
+ * Exibe a visão da semana inteira, permitindo navegação rápida entre dias
+ * e visualização global de metas e compromissos agendados.
+ */
+import React, { useContext, useState, useEffect } from 'react';
 import { Calendar, Info } from 'lucide-react';
 
 export default function WeeklyGrid() {
